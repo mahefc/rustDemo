@@ -3,19 +3,20 @@
 mod services;
 mod models;
 mod controllers;
+mod utils;
 use axum::{
     routing::{get, post, put, delete}, 
     Router, 
     middleware::{from_fn, Next},
-    http::{Request},
+    http::Request,
     response::Response,
     body::Body,
 };
-use services::db::get_pool;
+use utils::db::get_pool;
 use lambda_http::{run, Error};
 use controllers::user_ctrl;
-use services::auth;
 use tower_http::cors::{CorsLayer, Any};
+use utils::logger;
 
 
 #[tokio::main]
@@ -31,13 +32,13 @@ async fn main() -> Result<(), Error> {
     let user_routes = Router::new()
         .route("/", get(user_ctrl::get_users))
         .route("/", post(user_ctrl::create_user))
-        .route("/", put(user_ctrl::update_user))
+        .route("/:id", put(user_ctrl::update_user))
         .route("/:id", get(user_ctrl::get_user))
         .route("/:id", delete(user_ctrl::delete_user));
 
     let app = Router::new()
         .nest("/users", user_routes)
-        .layer(from_fn(auth::is_authenticated))
+        // .layer(from_fn(auth::is_authenticated))
         .layer(cors)
         .layer(from_fn(logging_middleware));
 
@@ -46,11 +47,17 @@ async fn main() -> Result<(), Error> {
 
 
 async fn logging_middleware(req: Request<Body>, next: Next) -> Response {
+    let method = req.method().clone();
     let path = req.uri().path().to_string();
+    let query = req.uri().query().map(|q| q.to_string()).unwrap_or_default();
+    
+    logger::log_info("REQUEST", &format!("{} {} {}", method, path, query));
+    
     let response = next.run(req).await;
     let status = response.status().as_u16();
-
-    eprintln!("Info: '{}' - {}", path, status);
+    
+    let log_level = if status >= 400 { "ERROR" } else { "RESPONSE" };
+    logger::log_info(log_level, &format!("{} {} - Status: {}", method, path, status));
 
     response
 }
