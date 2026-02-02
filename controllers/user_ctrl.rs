@@ -1,43 +1,84 @@
-use axum::{Json, extract::Path, http::StatusCode};
+use axum::{
+    Json, 
+    extract::Path, 
+    http::StatusCode,
+    response::IntoResponse,
+};
 use uuid::Uuid;
-use crate::models::User;
+use serde_json::{json, Value};
 use crate::services::user_service;
+use crate::utils::{helpers,logger};
+use helpers::ResponseFormat;
 
-pub async fn get_users() -> Result<Json<Vec<User>>, StatusCode> {
-    match user_service::get_users().await {
-        Ok(users) => Ok(Json(users)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
+/// Fetch all users - plain data response
+pub async fn get_users() -> Result<impl IntoResponse, (StatusCode, String)> {
+    logger::log_info("GET_USERS", "Fetching all users");
+    let result = user_service::get_users()
+        .await
+        .map_err(|e| {
+            let err = format!("Failed to fetch users: {}", e);
+            logger::log_error("GET_USERS", &err);
+            err.to_string()
+        });
+    
+    helpers::handle_response(result, ResponseFormat::DataFetch)
 }
 
-pub async fn create_user(Json(user): Json<User>) -> Result<Json<User>, StatusCode> {
-    match user_service::create_user(user).await {
-        Ok(created) => Ok(Json(created)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+/// Create a new user - response with status wrapper
+pub async fn create_user(Json(payload): Json<Value>) -> Result<impl IntoResponse, (StatusCode, String)> {
+    logger::log_info("CREATE_USER", "Received payload");
+    let result = user_service::create_user(&payload).await;
+    
+    if let Err(ref e) = result {
+        logger::log_error("CREATE_USER", e);
+    } else {
+        logger::log_info("CREATE_USER", "User created successfully");
     }
+    
+    helpers::handle_response(result, ResponseFormat::Created)
 }
 
-pub async fn update_user(Json(user): Json<User>) -> Result<Json<User>, StatusCode> {
-    match user_service::update_user(user).await {
-        Ok(updated) => Ok(Json(updated)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+/// Update user by ID - response with status wrapper
+pub async fn update_user(
+    Path(id): Path<Uuid>,
+    Json(payload): Json<Value>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    logger::log_info("UPDATE_USER", &format!("User ID: {}, Payload: {:?}", id, payload));
+    let result = user_service::update_user_partial(id, &payload).await;
+    
+    if let Err(ref e) = result {
+        logger::log_error("UPDATE_USER", e);
+    } else {
+        logger::log_info("UPDATE_USER", "Updated successfully");
     }
+    
+    helpers::handle_response(result, ResponseFormat::Updated)
 }
 
-pub async fn delete_user(Path(id): Path<Uuid>) -> Result<Json<String>, StatusCode> {
-    match user_service::delete_user(id).await {
-        Ok(_) => Ok(Json("User deleted".to_string())),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+/// Delete user by ID - response with status wrapper
+pub async fn delete_user(Path(id): Path<Uuid>) -> Result<impl IntoResponse, (StatusCode, String)> {
+    logger::log_info("DELETE_USER", &format!("Deleting user: {}", id));
+    let result = user_service::delete_user(id)
+        .await
+        .map(|_| json!({"message": "User deleted"}));
+    
+    if let Err(ref e) = result {
+        logger::log_error("DELETE_USER", e);
+    } else {
+        logger::log_info("DELETE_USER", "User deleted successfully");
     }
+    
+    helpers::handle_response(result, ResponseFormat::Deleted)
 }
 
-pub async fn get_user(Path(id): Path<Uuid>) -> Result<Json<User>, StatusCode> {
-    match user_service::get_user(id).await {
-        Ok(user) => Ok(Json(user)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+/// Get single user by ID - plain data response
+pub async fn get_user(Path(id): Path<Uuid>) -> Result<impl IntoResponse, (StatusCode, String)> {
+    logger::log_info("GET_USER", &format!("Fetching user: {}", id));
+    let result = user_service::get_user(id).await;
+    
+    if let Err(ref e) = result {
+        logger::log_error("GET_USER", e);
     }
-}
-
-pub async fn health() -> Json<String> {
-    Json("OK".to_string())
+    
+    helpers::handle_response(result, ResponseFormat::DataSingle)
 }
