@@ -29,7 +29,6 @@ where
     type Rejection = (StatusCode, String);
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        // 1. Check for 'decodedtoken' header
         if let Some(decoded_header) = parts.headers.get("decodedtoken") {
             if let Ok(decoded_str) = decoded_header.to_str() {
                 if let Ok(claims) = serde_json::from_str::<Claims>(decoded_str) {
@@ -38,7 +37,6 @@ where
             }
         }
 
-        // 2. Fallback to 'Authorization' header
         let auth_header = parts.headers.get("Authorization")
             .or_else(|| parts.headers.get("authorization"));
 
@@ -60,7 +58,7 @@ where
 
 pub fn decode_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let secret = env::var("JWTSECRET").unwrap_or_else(|_| "secret".to_string());
-    
+
     let mut validation = Validation::default();
     validation.validate_exp = false;
     validation.validate_aud = false;
@@ -73,7 +71,7 @@ pub fn decode_token(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> 
         &decoding_key,
         &validation,
     )?;
-    
+
     Ok(token_data.claims)
 }
 
@@ -82,11 +80,9 @@ pub async fn is_authenticated(
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
     let (mut parts, body) = req.into_parts();
-    
-    // Attempt to extract the user from the request parts
+
     match AuthenticatedUser::from_request_parts(&mut parts, &()).await {
         Ok(AuthenticatedUser(claims)) => {
-            // Reconstruct the request and insert the claims into extensions
             let mut req = Request::from_parts(parts, body);
             req.extensions_mut().insert(claims);
             Ok(next.run(req).await)
