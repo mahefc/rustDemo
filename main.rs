@@ -1,63 +1,65 @@
-#![allow(non_snake_case)]
-
-mod services;
-mod models;
-mod controllers;
-mod utils;
 use axum::{
-    routing::{get, post, put, delete}, 
-    Router, 
-    middleware::{from_fn, Next},
-    http::Request,
-    response::Response,
-    body::Body,
+    Router,
+    middleware::from_fn,
+    middleware::from_fn_with_state,
+    routing::{get, post, put},
 };
-use utils::db::get_pool;
-use lambda_http::{run, Error};
-use controllers::user_ctrl;
-use tower_http::cors::{CorsLayer, Any};
-use utils::logger;
+use std::sync::Arc;
 
-
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    dotenvy::dotenv().ok();
-    get_pool().await.expect("Failed to connect to database");
-
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    let user_routes = Router::new()
-        .route("/", get(user_ctrl::get_users))
-        .route("/", post(user_ctrl::create_user))
-        .route("/:id", put(user_ctrl::update_user))
-        .route("/:id", get(user_ctrl::get_user))
-        .route("/:id", delete(user_ctrl::delete_user));
-
-    let app = Router::new()
-        .nest("/users", user_routes)
-        // .layer(from_fn(auth::is_authenticated))
-        .layer(cors)
-        .layer(from_fn(logging_middleware));
-
-    run(app).await
+mod utils {
+    pub mod auth;
+    pub mod common;
+    pub mod state;
 }
 
+mod repos {
+    pub mod folder_r;
+}
 
-async fn logging_middleware(req: Request<Body>, next: Next) -> Response {
-    let method = req.method().clone();
-    let path = req.uri().path().to_string();
-    let query = req.uri().query().map(|q| q.to_string()).unwrap_or_default();
-    
-    logger::log_info("REQUEST", &format!("{} {} {}", method, path, query));
-    
-    let response = next.run(req).await;
-    let status = response.status().as_u16();
-    
-    let log_level = if status >= 400 { "ERROR" } else { "RESPONSE" };
-    logger::log_info(log_level, &format!("{} {} - Status: {}", method, path, status));
+mod services {
+    pub mod folder_s;
+}
 
-    response
+mod handlers {
+    pub mod folder_h;
+}
+
+use utils::auth::require_auth;
+use utils::common::logger;
+use utils::state::AppState;
+
+use handlers::folder_h;
+
+#[tokio::main]
+async fn main() {
+    dotenvy::dotenv().ok();
+
+    let state = AppState::new().await;
+    let app = app(state);
+
+    lambda_http::run(app).await.expect("Lambda runtime failed");
+}
+
+fn app(state: Arc<AppState>) -> Router {
+    let auth = from_fn_with_state(state.clone(), require_auth);
+
+    let public = Router::new().route("/health", get(|| async { "Server is UP" }));
+
+    let protected = Router::new()
+        // Folders
+        .route("/folder/create", post(folder_h::create_folder))
+        .route("/folder/update", put(folder_h::update_folder))
+        .route("/folder/getAll/:tenantId", get(folder_h::get_all_folders))
+        .route("/folder/getAll/:tenantId/workspace/:workspaceId", get(folder_h::get_all_folders))
+        .route("/folder/template/:templateId",get(folder_h::get_folders_by_template_id))
+        .route("/folder/template/:templateId/parentFolder",get(folder_h::get_folder_by_template_id))
+        .route("/folder/:projectId/exists",get(folder_h::folder_exists_in_project))
+        .route("/folder/:id",get(folder_h::get_folder_by_id).delete(folder_h::delete_folder))
+        .layer(auth);
+
+    Router::new()
+        .merge(public)
+        .merge(protected)
+        .layer(from_fn(logger))
+        .with_state(state)
 }
