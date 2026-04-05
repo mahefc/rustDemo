@@ -24,3 +24,9 @@ cargo add dotenvy
 
 # UUID feature access
 cargo add uuid --features v4,serde
+
+# Logging
+cargo add tracing tracing-subscriber --features tracing-subscriber/fmt
+
+# Bcrypt
+cargo add bcrypt

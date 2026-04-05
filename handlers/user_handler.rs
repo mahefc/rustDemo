@@ -1,9 +1,13 @@
 use axum::{extract::{State, Path, rejection::JsonRejection}, Json, http::StatusCode};
-use crate::models::user_model::{User,UpdateUser};
-use crate::services::user_service;
 use uuid::Uuid;
-use crate::AppState;
-use crate::utils::common::AppError;
+use crate::{
+    AppState,
+    utils::middleware::AppError,
+    utils::auth::{Claims, generate_token},
+    services::user_service,
+    models::user_model::{User, UpdateUser, CreateUserRequest, LoginRequest, LoginResponse}
+};
+
 
 
 pub async fn health() -> String {
@@ -13,7 +17,7 @@ pub async fn health() -> String {
 
 pub async fn create_user(
     State(state): State<AppState>,
-    payload: Result<Json<User>, JsonRejection>
+    payload: Result<Json<CreateUserRequest>, JsonRejection>
 ) -> Result<(StatusCode, Json<User>), AppError> {
     
     let payload = AppError::extract_json(payload)?;
@@ -47,4 +51,30 @@ pub async fn update_user(
     let user = AppError::internal_result(user_service::update_user(&state.db, payload).await)?;
 
     Ok((StatusCode::OK, Json(user)))
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    payload: Result<Json<LoginRequest>, JsonRejection>
+) -> Result<(StatusCode, Json<LoginResponse>), AppError> {
+    
+    let payload = AppError::extract_json(payload)?;
+
+    let user = match user_service::login_user(&state.db, payload).await {
+        Ok(user) => user,
+        Err(sqlx::Error::RowNotFound) => return Err(AppError::unauthorized("Invalid username or password")),
+        Err(err) => return Err(AppError::internal(err)),
+    };
+
+    let claims = Claims::new(user.id, user.username.clone());
+    let token = generate_token(&claims, &state.jwt_secret)?;
+
+    let response = LoginResponse {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        token,
+    };
+
+    Ok((StatusCode::OK, Json(response)))
 }

@@ -16,8 +16,8 @@ pub struct User {
     #[validate(email)]
     pub email: String,
     
-    // #[serde(skip_serializing)]
-    // pub password: Option<String>,
+    #[serde(skip_serializing)]
+    pub password: String,
     
     #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
@@ -27,8 +27,29 @@ pub struct User {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UpdateUser {
     pub id: Uuid,
     pub username: String,
     pub email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LoginResponse {
+    pub id: Uuid,
+    pub username: String,
+    pub email: String,
+    pub token: String,
 }
