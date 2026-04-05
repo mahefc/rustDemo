@@ -1,25 +1,26 @@
-Install it once:
+# Tokio: Running async/await tasks, network communication, handling concurrency, managing timers and signals. 
+cargo add tokio --features full
 
+# Axum: Web applications, RESTful APIs, type-safe route handling, easy middleware integration (tracing, auth, compression).
+cargo add axum
 
-cargo install sqlx-cli --no-default-features --features postgres
-Run migrations manually:
+# Sqlx-cli manages database interactions, specifically for migrations (schema changes) and compile-time SQL checking
+cargo add sqlx --features postgres,runtime-tokio,chrono,uuid,macros
 
+# serde_json handle json
+cargo add serde_json
 
-sqlx migrate run --database-url "postgresql://username:password@host/schema"
-Or if DATABASE_URL is set in your .env:
+# Serde used to derive struct serialization / deserialization
+cargo add serde --features derive
 
+# Chorno used for Date functions
+cargo add chrono --no-default-features -F serde -F clock
 
-sqlx migrate run
-Other useful commands:
+# Validator used for validation serde value
+cargo add validator --features derive
 
+# Dotenv used for environment access
+cargo add dotenvy
 
-# check which migrations have been applied
-sqlx migrate info
-
-# revert the last migration
-sqlx migrate revert
-
-# add a new migration file (auto-generates the filename)
-sqlx migrate add create_projects
-# → creates migrations/0002_create_projects.sql
-The sqlx migrate add command is especially handy — it generates the next numbered file for you so you don't have to track the sequence manually.
+# UUID feature access
+cargo add uuid --features v4,serde
