@@ -1,55 +1,56 @@
-use reqwest::{Method, header::HeaderMap};
-use axum::{Json, response::{IntoResponse, Response},http::{StatusCode}};
-use serde_json::Value;
+use axum::{
+    extract::rejection::JsonRejection,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::json;
 
-pub enum ExternalResponse {
-    Json(Value),
-    Text(String),
-    Buffer(Vec<u8>)
+pub struct AppError {
+    pub status: StatusCode,
+    pub message: String,
 }
 
-pub async fn external_request(
-    method: Method,
-    url: &str,
-    headers: Option<HeaderMap>,
-    body: Option<Value>,
-) -> Result<ExternalResponse, StatusCode> {
-    let client = reqwest::Client::new();
-    let mut request = client.request(method, url);
-
-    if let Some(h) = headers { request = request.headers(h); }
-
-    if let Some(b) = body { request = request.json(&b); }
-
-    let response = request.send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-
-    // Inspect Content-Type header
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE)
-                               .and_then(|ct| ct.to_str().ok()).unwrap_or("");
-
-    if content_type.contains("application/json") {
-        let json = response.json::<Value>().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-        Ok(ExternalResponse::Json(json))
-    } else if content_type.contains("text/") {
-        let text = response.text().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-        Ok(ExternalResponse::Text(text))
-    } else {
-        let bytes = response.bytes().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-        Ok(ExternalResponse::Buffer(bytes.to_vec()))
-    }
-}
-
-
-
-impl IntoResponse for ExternalResponse {
-    fn into_response(self) -> Response {
-        match self {
-            ExternalResponse::Json(val) => Json(val).into_response(),
-            ExternalResponse::Text(text) => text.into_response(),
-            ExternalResponse::Buffer(buf) => buf.into_response(),
+impl AppError {
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
         }
     }
+
+    pub fn internal<E: ToString>(error: E) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    }
+
+    pub fn internal_result<T, E: ToString>(result: Result<T, E>) -> Result<T, Self> {
+        result.map_err(Self::internal)
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn extract_json<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, Self> {
+        payload.map_err(Self::from).map(|json| json.0)
+    }
 }
 
+impl From<JsonRejection> for AppError {
+    fn from(err: JsonRejection) -> Self {
+        AppError::bad_request(err.body_text())
+    }
+}
 
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        
+        let body = Json(json!({
+            "status": "error",
+            "message": self.message,
+        }));
+        println!("AppError: {}", self.message);
 
+        (self.status, body).into_response()
+    }
+}

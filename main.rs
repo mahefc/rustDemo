@@ -1,65 +1,54 @@
-use axum::{
-    Router,
-    middleware::from_fn,
-    middleware::from_fn_with_state,
-    routing::{get, post, put},
-};
-use std::sync::Arc;
+use axum::{routing::{get,post,put}, Router,serve};
+use tokio::net::TcpListener;
+use std::env;
+use sqlx::PgPool;
 
-mod utils {
-    pub mod auth;
-    pub mod common;
-    pub mod state;
+#[derive(Clone)]
+pub struct AppState {
+    pub db: PgPool,
 }
-
-mod repos {
-    pub mod folder_r;
-}
-
-mod services {
-    pub mod folder_s;
-}
-
 mod handlers {
-    pub mod folder_h;
+    pub mod user_handler;
 }
-
-use utils::auth::require_auth;
-use utils::common::logger;
-use utils::state::AppState;
-
-use handlers::folder_h;
+mod models {
+    pub mod user_model;
+}
+mod services {
+    pub mod user_service;
+}
+mod utils {
+    pub mod common;
+}
+use crate::handlers::user_handler;
 
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-
-    let state = AppState::new().await;
-    let app = app(state);
-
-    lambda_http::run(app).await.expect("Lambda runtime failed");
+    let pool = get_pool().await;
+    let state = AppState { db: pool };
+    let app = routes(state);
+    let port = env::var("PORT").unwrap_or("3000".into());
+    let addr = format!("0.0.0.0:{port}");
+    let listener = TcpListener::bind(&addr).await.unwrap();
+    serve(listener, app).await.unwrap();
 }
 
-fn app(state: Arc<AppState>) -> Router {
-    let auth = from_fn_with_state(state.clone(), require_auth);
 
-    let public = Router::new().route("/health", get(|| async { "Server is UP" }));
+pub async fn get_pool() -> PgPool {
+    let db_url = env::var("DB_URL").expect("DB_URL must be set");
 
-    let protected = Router::new()
-        // Folders
-        .route("/folder/create", post(folder_h::create_folder))
-        .route("/folder/update", put(folder_h::update_folder))
-        .route("/folder/getAll/:tenantId", get(folder_h::get_all_folders))
-        .route("/folder/getAll/:tenantId/workspace/:workspaceId", get(folder_h::get_all_folders))
-        .route("/folder/template/:templateId",get(folder_h::get_folders_by_template_id))
-        .route("/folder/template/:templateId/parentFolder",get(folder_h::get_folder_by_template_id))
-        .route("/folder/:projectId/exists",get(folder_h::folder_exists_in_project))
-        .route("/folder/:id",get(folder_h::get_folder_by_id).delete(folder_h::delete_folder))
-        .layer(auth);
+    PgPool::connect(&db_url)
+        .await
+        .expect("Failed to connect to DB")
+}
 
+fn routes(state: AppState) -> Router {
     Router::new()
-        .merge(public)
-        .merge(protected)
-        .layer(from_fn(logger))
-        .with_state(state)
+    .route("/", get(user_handler::health))
+    .nest("/user", Router::new()
+        .route("/", post(user_handler::create_user))
+        .route("/", put(user_handler::update_user))
+        .route("/{id}", get(user_handler::get_user_by_id))
+    )
+    .with_state(state)
 }
